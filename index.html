@@ -18,7 +18,8 @@
   header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:12px 16px 10px}
   .top{display:flex;align-items:center;justify-content:space-between;gap:12px;max-width:720px;margin:0 auto}
   .brand{font-family:Oswald,sans-serif;font-weight:600;letter-spacing:3px;text-transform:uppercase;font-size:14px;color:var(--accent)}
-  .tools{display:flex;gap:8px}
+  .tools{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  @media (max-width:420px){ .chip-btn{padding:8px 10px;font-size:13px} .brand{font-size:12px;letter-spacing:2px} }
   .chip-btn{background:none;border:1px solid var(--line);color:var(--text);border-radius:20px;padding:8px 14px;font:500 14px Inter,sans-serif;min-height:40px;cursor:pointer}
   .chip-btn:hover{border-color:var(--muted)}
   .timeline{display:flex;gap:6px;overflow-x:auto;max-width:720px;margin:10px auto 0;padding-bottom:4px;scrollbar-width:none}
@@ -59,6 +60,15 @@
   .box .row{display:flex;gap:10px}
   .box button{flex:1;min-height:48px;border-radius:12px;border:1px solid var(--line);background:none;color:var(--text);font:600 16px Inter,sans-serif;cursor:pointer}
   .box button.danger{background:var(--chili);border-color:var(--chili);color:#1E1C1A}
+  .box button.go{background:var(--accent);border-color:var(--accent);color:#1E1C1A}
+  .box label{display:block;font:600 13px Oswald,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+  .box input[type=time]{width:100%;min-height:52px;margin-bottom:12px;border-radius:12px;border:1px solid var(--line);background:var(--bg);color:var(--text);font:600 22px Inter,sans-serif;padding:0 14px;color-scheme:dark}
+  .box .hint{font-size:14px;color:var(--muted);margin:0 0 16px}
+  .chip-btn.set{border-color:var(--accent);color:var(--accent)}
+  .status{margin-top:16px;border-radius:12px;padding:12px 14px;font-size:15px;line-height:1.45;background:var(--panel);border:1px solid var(--line)}
+  .status b{color:var(--accent)}
+  .status.late b{color:var(--chili)}
+  .status.ok b{color:var(--done)}
 </style>
 </head>
 <body>
@@ -66,7 +76,8 @@
   <div class="top">
     <div class="brand">Chili Night</div>
     <div class="tools">
-      <button class="chip-btn" id="nowBtn" type="button">Jump to now</button>
+      <button class="chip-btn" id="readyBtn" type="button">Ready by</button>
+      <button class="chip-btn" id="nowBtn" type="button">Now</button>
       <button class="chip-btn" id="resetBtn" type="button">Reset</button>
     </div>
   </div>
@@ -88,6 +99,18 @@
     <div class="row">
       <button type="button" id="mCancel">Cancel</button>
       <button type="button" class="danger" id="mOk">Reset</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="rmodal" role="dialog" aria-modal="true" aria-labelledby="rlabel">
+  <div class="box">
+    <label for="rtime" id="rlabel">Chili ready at</label>
+    <input type="time" id="rtime" step="300">
+    <p class="hint" id="rhint">Every step gets a real clock time, counted back from this. Total day-of time is 2 hr 40 min, plus an 8 to 12 hour brine the night before.</p>
+    <div class="row">
+      <button type="button" id="rClear">Clear</button>
+      <button type="button" class="go" id="rSave">Set</button>
     </div>
   </div>
 </div>
@@ -215,23 +238,57 @@ const BLOCKS = [
 ];
 
 const KEY = "chili-plan-2026-11-16-v1";
-let state = { idx:0, done:{}, startAt:null };
+let state = { idx:0, done:{}, startAt:null, target:null };
 try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && typeof s.idx === "number") state = Object.assign(state, s); } catch(e) {}
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e) {} }
+
+const TOTAL = BLOCKS[BLOCKS.length-1].off; /* minutes from bean boil to ready */
+const BRINE_MIN = 8*60, BRINE_MAX = 12*60;
 
 function ids(b){ const out=[]; BLOCKS[b].groups.forEach((g,gi)=>g[1].forEach((t,ti)=>out.push(b+"-"+gi+"-"+ti))); return out; }
 function isComplete(b){ const a=ids(b); return a.every(id=>state.done[id]); }
 
-function clock(off){
-  const d = new Date(state.startAt + off*60000);
+/* Actual start wins once the clock is running; otherwise plan back from the ready time. */
+function anchor(){
+  if (state.startAt) return state.startAt;
+  if (state.target) return state.target - TOTAL*60000;
+  return null;
+}
+function fmt(ms, withDay){
+  const d = new Date(ms);
   let h = d.getHours(), m = d.getMinutes(), ap = h>=12 ? "pm" : "am";
   h = h%12 || 12;
-  return h + ":" + String(m).padStart(2,"0") + ap;
+  let s = h + ":" + String(m).padStart(2,"0") + ap;
+  if (withDay) {
+    const today = new Date(); today.setHours(0,0,0,0);
+    const day = new Date(ms); day.setHours(0,0,0,0);
+    const diff = Math.round((day - today)/86400000);
+    s += diff===0 ? " today" : diff===1 ? " tomorrow" : diff===-1 ? " yesterday" : " " + d.toLocaleDateString([], {weekday:"short"});
+  }
+  return s;
 }
-function tabLabel(b){ return (b.off!==null && state.startAt) ? clock(b.off) : b.label; }
+function clock(off){ return fmt(anchor() + off*60000); }
+function tabLabel(b){ return (b.off!==null && anchor()) ? clock(b.off) : b.label; }
 function bigLabel(b){
   if (b.off===null) return b.label;
-  return state.startAt ? clock(b.off) : "+" + b.label;
+  return anchor() ? clock(b.off) : "+" + b.label;
+}
+function mins(n){ n=Math.round(Math.abs(n)); const h=Math.floor(n/60), m=n%60; return (h? h+" hr ":"") + (m||!h? m+" min":"").trim(); }
+
+function statusHtml(b){
+  const a = anchor(); if (!a) return "";
+  if (b.label==="Night before") {
+    return `<div class="status">Brine window: <b>${fmt(a-BRINE_MAX*60000,true)}</b> to <b>${fmt(a-BRINE_MIN*60000,true)}</b>. Beans go on to boil at <b>${fmt(a,true)}</b>.</div>`;
+  }
+  if (!state.startAt) {
+    if (b.label==="Day of") return `<div class="status">Put the bean pot on at <b>${fmt(a,true)}</b> to be ready at <b>${fmt(state.target,true)}</b>.</div>`;
+    return "";
+  }
+  if (!state.target) return "";
+  const proj = state.startAt + TOTAL*60000, diff = (proj - state.target)/60000;
+  if (Math.abs(diff) < 3) return `<div class="status ok">On track for <b>${fmt(state.target)}</b>.</div>`;
+  if (diff > 0) return `<div class="status late">Started <b>${mins(diff)} late</b>. Projected ready ${fmt(proj)}. To claw it back, trim the final simmer, but keep at least 1 hour so the beans soak up flavor.</div>`;
+  return `<div class="status ok">Started <b>${mins(diff)} early</b>. Projected ready ${fmt(proj)}. Hold on the lowest heat until ${fmt(state.target)}.</div>`;
 }
 
 const tl = document.getElementById("timeline");
@@ -242,9 +299,10 @@ function render(){
   const b = BLOCKS[state.idx];
   tl.innerHTML = BLOCKS.map((x,i)=>`<button type="button" role="tab" aria-selected="${i===state.idx}" class="tl ${i===state.idx?"cur":""} ${isComplete(i)?"complete":""}" data-i="${i}">${tabLabel(x)}${isComplete(i)?" ✓":""}</button>`).join("");
   const all = ids(state.idx), n = all.filter(id=>state.done[id]).length;
-  const sub = (b.off!==null && state.startAt) ? " · +" + b.label + " from start" : "";
+  const sub = (b.off!==null && anchor()) ? " · +" + b.label + " from start" : "";
   let html = `<div class="when"><div class="time" style="${b.off===null?"font-size:44px":""}">${bigLabel(b)}</div><div class="count">Step ${state.idx+1} of ${BLOCKS.length} · ${n}/${all.length} done${sub}</div></div>
     <div class="headline">${esc(b.headline)}</div>
+    ${statusHtml(b)}
     <div class="progress"><div style="width:${all.length? n/all.length*100:0}%"></div></div>`;
   b.groups.forEach((g,gi)=>{
     const d = DISH[g[0]];
@@ -257,8 +315,9 @@ function render(){
   });
   if (b.startBtn) {
     html += state.startAt
-      ? `<div class="note"><b>Clock started at ${clock(0)}.</b> Times now show the real clock. Reset to clear it.</div>`
-      : `<button type="button" class="start" id="startBtn">Start the clock · bean pot is on</button>`;
+      ? `<div class="note"><b>Clock started at ${fmt(state.startAt)}.</b> Times now follow your actual start. Reset to clear it.</div>`
+      : `<button type="button" class="start" id="startBtn">Start the clock · bean pot is on</button>`
+        + (state.target ? "" : `<div class="note"><b>Cooking to a time?</b> Tap Ready by at the top and every step gets a clock time.</div>`);
   }
   if (state.idx < BLOCKS.length-1) {
     const nx = BLOCKS[state.idx+1];
@@ -271,7 +330,10 @@ function render(){
   const nextBtn = document.getElementById("next");
   nextBtn.disabled = state.idx===BLOCKS.length-1;
   nextBtn.textContent = state.idx===BLOCKS.length-1 ? "Enjoy" : "Next · " + tabLabel(BLOCKS[state.idx+1]);
-  document.getElementById("nowBtn").style.display = state.startAt ? "" : "none";
+  document.getElementById("nowBtn").style.display = anchor() ? "" : "none";
+  const rb = document.getElementById("readyBtn");
+  rb.textContent = state.target ? "Ready " + fmt(state.target) : "Ready by";
+  rb.classList.toggle("set", !!state.target);
   const cur = tl.querySelector(".cur"); if (cur) cur.scrollIntoView({inline:"center", block:"nearest"});
 }
 
@@ -286,17 +348,35 @@ main.addEventListener("change", e=>{
 document.getElementById("prev").onclick = ()=>go(state.idx-1);
 document.getElementById("next").onclick = ()=>go(state.idx+1);
 document.getElementById("nowBtn").onclick = ()=>{
-  if (!state.startAt) return;
-  const el = (Date.now() - state.startAt)/60000;
+  const a = anchor(); if (!a) return;
+  const el = (Date.now() - a)/60000;
+  if (el < -BRINE_MIN) return go(0);   /* still time to brine */
+  if (el < 0) return go(1);            /* brining, waiting for the bean pot */
   let pick = 2;
   BLOCKS.forEach((b,i)=>{ if(b.off!==null && el >= b.off) pick=i; });
   go(pick);
 };
+const rmodal = document.getElementById("rmodal"), rtime = document.getElementById("rtime");
+document.getElementById("readyBtn").onclick = ()=>{
+  const d = state.target ? new Date(state.target) : new Date(Date.now() + 3*3600000);
+  rtime.value = String(d.getHours()).padStart(2,"0") + ":" + String(Math.floor(d.getMinutes()/5)*5).padStart(2,"0");
+  rmodal.classList.add("open"); rtime.focus();
+};
+document.getElementById("rSave").onclick = ()=>{
+  if (!rtime.value) return;
+  const [h,m] = rtime.value.split(":").map(Number);
+  const t = new Date(); t.setHours(h,m,0,0);
+  /* Next occurrence of that time. If the clock is already running, keep it on the day of the cook. */
+  const ref = state.startAt || Date.now();
+  if (t.getTime() <= ref) t.setDate(t.getDate()+1);
+  state.target = t.getTime(); save(); rmodal.classList.remove("open"); render();
+};
+document.getElementById("rClear").onclick = ()=>{ state.target=null; save(); rmodal.classList.remove("open"); render(); };
 const modal = document.getElementById("modal");
 document.getElementById("resetBtn").onclick = ()=>modal.classList.add("open");
 document.getElementById("mCancel").onclick = ()=>modal.classList.remove("open");
-document.getElementById("mOk").onclick = ()=>{ state={idx:0,done:{},startAt:null}; save(); modal.classList.remove("open"); render(); };
-document.addEventListener("keydown", e=>{ if(e.key==="Escape") modal.classList.remove("open"); });
+document.getElementById("mOk").onclick = ()=>{ state={idx:0,done:{},startAt:null,target:null}; save(); modal.classList.remove("open"); render(); };
+document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ modal.classList.remove("open"); rmodal.classList.remove("open"); } });
 
 render();
 </script>
