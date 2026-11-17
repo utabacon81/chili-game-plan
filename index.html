@@ -69,6 +69,19 @@
   .status b{color:var(--accent)}
   .status.late b{color:var(--chili)}
   .status.ok b{color:var(--done)}
+  .ings{background:#2c2723;border:1px solid var(--line);border-left:4px solid var(--c,#888);border-radius:12px;padding:12px 14px;margin-bottom:10px}
+  .ings h4{margin:0 0 6px;font:600 12px Oswald,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
+  .ings ul{margin:0;padding:0;list-style:none}
+  .ings li{display:flex;gap:10px;align-items:baseline;padding:6px 0;font-size:16px;line-height:1.35;border-top:1px solid #36312c}
+  .ings li:first-child{border-top:none}
+  .ings .amt{flex:0 0 auto;min-width:92px;font-weight:600;color:var(--text)}
+  .ings .nm{flex:1;color:#E9E2D8}
+  .badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;font:600 11px Inter,sans-serif;letter-spacing:.5px;text-transform:uppercase;vertical-align:2px;background:#3f5a53;color:#CFE7E0}
+  .gather{margin:6px 0 4px}
+  .gather>.ings{border-left-color:var(--accent)}
+  .bopts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
+  .bopts button{min-height:52px;border-radius:12px;border:1px solid var(--line);background:none;color:var(--text);font:600 18px Oswald,sans-serif;cursor:pointer}
+  .bopts button.on{background:var(--accent);border-color:var(--accent);color:#1E1C1A}
 </style>
 </head>
 <body>
@@ -76,6 +89,7 @@
   <div class="top">
     <div class="brand">Chili Night</div>
     <div class="tools">
+      <button class="chip-btn" id="batchBtn" type="button">1x batch</button>
       <button class="chip-btn" id="readyBtn" type="button">Ready by</button>
       <button class="chip-btn" id="nowBtn" type="button">Now</button>
       <button class="chip-btn" id="resetBtn" type="button">Reset</button>
@@ -107,7 +121,7 @@
   <div class="box">
     <label for="rtime" id="rlabel">Chili ready at</label>
     <input type="time" id="rtime" step="300">
-    <p class="hint" id="rhint">Every step gets a real clock time, counted back from this. Total day-of time is 2 hr 40 min, plus an 8 to 12 hour brine the night before.</p>
+    <p class="hint" id="rhint"></p>
     <div class="row">
       <button type="button" id="rClear">Clear</button>
       <button type="button" class="go" id="rSave">Set</button>
@@ -115,143 +129,244 @@
   </div>
 </div>
 
+<div class="modal" id="bmodal" role="dialog" aria-modal="true" aria-labelledby="blabel">
+  <div class="box">
+    <label id="blabel">Batch size</label>
+    <div class="bopts" id="bopts"></div>
+    <p class="hint" id="bhint"></p>
+    <div class="row">
+      <button type="button" class="go" id="bDone">Done</button>
+    </div>
+  </div>
+</div>
+
 <script>
-const DISH = {
-  beans:{label:"Beans", color:"var(--beans)"},
-  chili:{label:"Chili", color:"var(--chili)"},
-  serve:{label:"Garnish and serve", color:"var(--serve)"},
-  all:{label:"Setup", color:"var(--all)"}
+/* ============================================================
+   Batch scaling
+   ============================================================ */
+const SCALES = [1, 1.5, 2, 3];
+const BASE_SERVINGS = 8;
+
+/* Base (1x) amounts. cons:true scales at 75% past 1x (heat and salt), and you correct at the end. */
+const ING = {
+  beans:      { q:12,  u:"oz",     n:"TN Bean Man Fresh Chili Mix Beans, dry" },
+  brineSalt:  { q:2,   u:"tbsp",   n:"kosher salt, for the brine" },
+  brineWater: { q:2,   u:"qt",     n:"water, for the brine" },
+  halfOnion:  { q:1,   u:"ea",     n:"onion half, for the bean pot", np:"onion halves, for the bean pot", whole:true },
+  bay:        { q:1,   u:"ea",     n:"bay leaf", np:"bay leaves", whole:true },
+  beanSalt:   { q:1,   u:"tsp",    n:"kosher salt, for the bean water" },
+  bacon:      { q:6,   u:"slices", n:"thick-cut applewood smoked bacon" },
+  garlic:     { q:4,   u:"cloves", n:"garlic" },
+  onion:      { q:2,   u:"ea",     n:"medium onion", np:"medium onions" },
+  redPep:     { q:1,   u:"ea",     n:"red bell pepper", np:"red bell peppers" },
+  yelPep:     { q:1,   u:"ea",     n:"yellow bell pepper", np:"yellow bell peppers" },
+  chiliP:     { q:3,   u:"tbsp",   n:"chili powder" },
+  cumin:      { q:1,   u:"tbsp",   n:"ground cumin" },
+  chipotle:   { q:1,   u:"tbsp",   n:"chipotle chili powder", cons:true },
+  oregano:    { q:2,   u:"tsp",    n:"dried oregano" },
+  paprika:    { q:1,   u:"tbsp",   n:"smoked paprika" },
+  salt:       { q:1.5, u:"tsp",    n:"kosher salt, starting amount", cons:true },
+  pepper:     { q:1,   u:"tsp",    n:"black pepper" },
+  beef:       { q:1,   u:"lb",     n:"85% lean ground beef" },
+  pork:       { q:1,   u:"lb",     n:"ground pork" },
+  beer:       { q:1.5, u:"cup",    n:"beer (or stock)" },
+  crushed:    { q:24,  u:"oz",     n:"crushed tomatoes" },
+  diced:      { q:24,  u:"oz",     n:"diced tomatoes, with juice" },
+  beanLiquid: { q:0.5, u:"cup",    n:"reserved bean cooking liquid" },
+  garnish:    { q:null,            n:"lime wedges, sour cream, Cheddar, scallions" }
 };
 
-/* off = minutes after you start the bean boil. null = before the clock starts. */
-const BLOCKS = [
-  { label:"Night before", off:null, headline:"Brine the beans. 8 to 12 hours.",
-    groups:[
-      ["beans",[
-        ["Weigh out 12 oz of the Fresh Chili Mix Beans","About a third of the 2 lb bag. Seal the rest airtight."],
-        ["Pick through for stones and shriveled beans, then rinse",""],
-        ["Dissolve 2 tbsp kosher salt in 2 quarts water","The salt brine gives softer skins and more even cooking across the three beans."],
-        ["Add the beans and soak at room temperature 8 to 12 hours","Past 12 hours, move them to the fridge."]
-      ]]
-    ]},
-  { label:"Day of", off:null, headline:"Pull everything before you light a burner. Tap Start when the bean pot goes on.",
-    groups:[
-      ["all",[
-        ["Set out a pot for the beans and a large Dutch oven for the chili",""],
-        ["Have on hand: 1 1/2 cups beer, 24 oz crushed tomatoes, 24 oz diced tomatoes","The extra 1/2 cup of beer covers the added beans. Stock works for that 1/2 cup too."]
-      ]],
-      ["beans",[
-        ["Halve an onion and grab 1 bay leaf","For the bean pot."]
-      ]]
-    ],
-    startBtn:true },
-  { label:"0:00", off:0, headline:"Hard boil the beans. Full rolling boil, 10 minutes minimum.",
-    groups:[
-      ["beans",[
-        ["Drain and rinse the brined beans",""],
-        ["Cover with water by 2 inches. Add the half onion, bay leaf and 1 tsp kosher salt",""],
-        ["Bring to a full rolling boil and hold it there 10 minutes","This destroys the lectin in the red beans. Don't skip it or shorten it."]
-      ]]
-    ]},
-  { label:"0:10", off:10, headline:"Beans to a simmer. Knock out the cutting board work.",
-    groups:[
-      ["beans",[
-        ["Drop to a gentle simmer, lid partly on","Bubbles barely breaking. A hard boil splits the skins."]
-      ]],
-      ["chili",[
-        ["Cut 6 slices thick-cut bacon into 1/2-inch pieces",""],
-        ["Finely chop 4 cloves garlic and 2 medium onions",""],
-        ["Chop 1 red and 1 yellow bell pepper",""],
-        ["Mix the spices in a small bowl","3 tbsp chili powder, 1 tbsp cumin, 1 tbsp chipotle chili powder, 2 tsp dried oregano, 1 tbsp smoked paprika."]
-      ]],
-      ["serve",[
-        ["Slice scallions, shred Cheddar, cut lime wedges","Leave in the fridge."]
-      ]]
-    ]},
-  { label:"0:40", off:40, headline:"Render the bacon. Taste a bean.",
-    groups:[
-      ["chili",[
-        ["Cook the bacon in the Dutch oven over medium until lightly crisp","About 8 minutes."]
-      ]],
-      ["beans",[
-        ["Taste a pinto and a red bean","Still chalky is fine here. Most fresh beans land at 45 to 75 minutes."]
-      ]]
-    ]},
-  { label:"0:48", off:48, headline:"Aromatics and spices.",
-    groups:[
-      ["chili",[
-        ["Add the onions, peppers, garlic and spice mix to the bacon",""],
-        ["Season with 1 1/2 tsp kosher salt and 1 tsp black pepper","Starting amount. You'll correct at the end."],
-        ["Cook until the vegetables are tender, about 8 minutes",""]
-      ]]
-    ]},
-  { label:"0:56", off:56, headline:"Brown the meat.",
-    groups:[
-      ["chili",[
-        ["Add 1 lb 85% ground beef and break it up",""],
-        ["When it starts to brown, add 1 lb ground pork","Cook until no pink remains, about 4 minutes."]
-      ]],
-      ["beans",[
-        ["Check the beans again","Done when creamy all the way through but still holding their shape."]
-      ]]
-    ]},
-  { label:"1:05", off:65, headline:"Beans done? Drain them and save the liquid.",
-    groups:[
-      ["beans",[
-        ["Confirm all three beans are tender","Not there yet? Pull the meat off the heat and keep simmering the beans. Never add underdone beans to the tomatoes."],
-        ["Fish out the onion and bay leaf",""],
-        ["Ladle off 1/2 cup cooking liquid, then drain","The bean liquid is for loosening the chili later."]
-      ]]
-    ]},
-  { label:"1:10", off:70, headline:"Build the chili and start the long simmer.",
-    groups:[
-      ["chili",[
-        ["Stir in the 1 1/2 cups beer and the cooked beans",""],
-        ["Add the crushed and diced tomatoes with their juice",""],
-        ["Bring up to a bubble, then drop to low","1 1/2 hours from here."]
-      ]]
-    ]},
-  { label:"1:40", off:100, headline:"Stir and check.",
-    groups:[
-      ["chili",[
-        ["Stir from the bottom","More beans means more starch on the bottom of the pot."],
-        ["Too tight? Loosen with some of the reserved bean liquid",""]
-      ]]
-    ]},
-  { label:"2:10", off:130, headline:"Stir and check again.",
-    groups:[
-      ["chili",[
-        ["Stir from the bottom",""],
-        ["Taste for heat","Want more? Add a pinch of chipotle now so it has time to bloom."]
-      ]]
-    ]},
-  { label:"2:40", off:160, headline:"Season and serve.",
-    groups:[
-      ["chili",[
-        ["Taste and correct the salt","Expect to add more than the canned version needs, since these beans brought none with them."],
-        ["Adjust the body with the last of the bean liquid if needed",""]
-      ]],
-      ["serve",[
-        ["Ladle up with lime wedges, sour cream, Cheddar and scallions",""]
-      ]]
-    ]}
-];
+function frac(x, step){
+  const r = Math.round(x/step)*step;
+  const w = Math.floor(r + 1e-9), f = +(r - w).toFixed(3);
+  const F = {0.25:"1/4", 0.5:"1/2", 0.75:"3/4"}[f] || "";
+  return w ? (F ? w + " " + F : String(w)) : (F || "0");
+}
+function amount(id, k){
+  const g = ING[id];
+  if (g.q == null) return "to taste";
+  const m = g.cons ? 1 + (k-1)*0.75 : k;
+  let v = g.q * m;
+  switch (g.u) {
+    case "tsp":
+      if (v >= 3) return amount_tbsp(v/3);
+      return frac(v, .25) + " tsp";
+    case "tbsp": return amount_tbsp(v);
+    case "cup":  return frac(v, .25) + " cup" + (v > 1.01 ? "s" : "");
+    case "qt":   return frac(v, .5) + " qt";
+    case "lb":   return frac(v, .25) + " lb";
+    case "oz": {
+      const oz = Math.round(v);
+      return oz >= 16 && id === "beans" ? oz + " oz (" + frac(oz/16, .25) + " lb)" : oz + " oz";
+    }
+    case "slices": return Math.ceil(v) + " slices";
+    case "cloves": return Math.ceil(v) + " cloves";
+    case "ea": {
+      const n = g.whole ? Math.max(1, Math.round(v)) : Math.round(v*2)/2;
+      return frac(n, .5);
+    }
+  }
+  return String(v);
+}
+function amount_tbsp(t){
+  if (t >= 8) {
+    const quarters = Math.floor(t/4);          /* 4 tbsp = 1/4 cup */
+    const rem = Math.round((t - quarters*4)*2)/2;
+    return frac(quarters/4, .25) + " cup" + (rem ? " + " + frac(rem, .5) + " tbsp" : "");
+  }
+  return frac(t, .25) + " tbsp";
+}
+function ingName(id, k){
+  const g = ING[id];
+  if (g.u === "ea") { const m = g.cons ? 1+(k-1)*.75 : k; const v = g.q*m; return (g.np && v > 1.01) ? g.np : g.n; }
+  return g.n;
+}
+function A(id){ return amount(id, S.scale); }
 
+/* ============================================================
+   Plan, rebuilt for each batch size
+   off = minutes after the bean pot goes on. null = before the clock starts.
+   Each block: ings = [[id, prepped?]] or [{amt, n, prepped}]
+   ============================================================ */
+function buildBlocks(k){
+  const big = k >= 2;
+  const POT  = {1:"6 qt Dutch oven", 1.5:"8 qt Dutch oven", 2:"12 qt stockpot", 3:"16 qt stockpot"}[k];
+  const BPOT = {1:4, 1.5:6, 2:8, 3:10}[k];
+  const meatBatches = k <= 1.5 ? 1 : Math.ceil(k);
+
+  const boil   = 10 + Math.round(5*(k-1));
+  const prep   = 30 + Math.round(12*(k-1));
+  const bacon  = 8 + Math.round(4*(k-1));
+  const arom   = 8 + Math.round(4*(k-1));
+  const meat   = meatBatches > 1 ? 7*meatBatches : 9 + Math.round(4*(k-1));
+  const simmer = 90 + Math.round(10*(k-1));
+  const beansDone = boil + 55 + Math.round(5*(k-1));
+
+  const tBacon = boil + prep, tArom = tBacon + bacon, tMeat = tArom + arom, baseDone = tMeat + meat;
+  const tDrain = beansDone;
+  const tBuild = Math.max(baseDone, beansDone + 5);
+  const tEnd   = tBuild + simmer;
+
+  const spiceAmts = `${A("chiliP")} chili powder, ${A("cumin")} cumin, ${A("chipotle")} chipotle chili powder, ${A("oregano")} dried oregano, ${A("paprika")} smoked paprika.`;
+
+  return [
+    { label:"Night before", off:null, headline:"Brine the beans. 8 to 12 hours.",
+      ings:[["beans"],["brineSalt"],["brineWater"]],
+      tasks:[
+        ["nb-weigh", `Weigh out ${A("beans")} of the Fresh Chili Mix Beans`, k*12 > 32 ? "That's more than one 2 lb bag, so you'll need two." : "One 2 lb bag covers it. Seal the rest airtight."],
+        ["nb-pick", "Pick through for stones and shriveled beans, then rinse", ""],
+        ["nb-brine", `Dissolve ${A("brineSalt")} kosher salt in ${A("brineWater")} water`, "The salt brine gives softer skins and more even cooking across the three beans."],
+        ["nb-soak", "Add the beans and soak at room temperature 8 to 12 hours", (big ? `Use a container that holds at least ${Math.ceil(k*3)} qt, since the beans roughly double. ` : "") + "Past 12 hours, move them to the fridge."]
+      ]},
+    { label:"Day of", off:null, headline:"Pull everything before you light a burner. Tap Start when the bean pot goes on.",
+      ings:[["beer"],["crushed"],["diced"],["halfOnion"],["bay"]],
+      tasks:[
+        ["do-pots", `Set out ${BPOT===8?"an":"a"} ${BPOT} qt or larger pot for the beans and a ${POT} for the chili`, big ? "Wider is better than taller. If your big pot is a tall stockpot, plan to brown the meat in a large skillet." : ""],
+        ["do-cans", `Have on hand: ${A("beer")} beer, ${A("crushed")} crushed tomatoes, ${A("diced")} diced tomatoes`, "Stock works in place of the extra beer."],
+        ["do-onion", `Halve ${Math.ceil(+amount("halfOnion",k)/2)===1 ? "an onion" : Math.ceil(+amount("halfOnion",k)/2)+" onions"} and grab ${amount("bay",k)} ${ingName("bay",k)}`, "For the bean pot."]
+      ],
+      startBtn:true },
+    { off:0, headline:"Hard boil the beans. Full rolling boil, 10 minutes minimum.",
+      ings:[["beans",true],["halfOnion",true],["bay"],["beanSalt"]],
+      tasks:[
+        ["b-drain", "Drain and rinse the brined beans", ""],
+        ["b-cover", `Cover with water by 2 inches. Add the ${ingName("halfOnion",k).replace(/,.*$/,"")}, ${ingName("bay",k)} and ${A("beanSalt")} kosher salt`, ""],
+        ["b-boil", "Bring to a full rolling boil and hold it there 10 minutes", "This destroys the lectin in the red beans. Don't skip it or shorten it." + (k > 1 ? " A bigger pot takes longer to come up. The 10 minutes starts at a full boil." : "")]
+      ]},
+    { off:boil, headline:"Beans to a simmer. Knock out the cutting board work.",
+      ings:[["bacon"],["garlic"],["onion"],["redPep"],["yelPep"],["chiliP"],["cumin"],["chipotle"],["oregano"],["paprika"],["garnish"]],
+      tasks:[
+        ["s-simmer", "Drop the beans to a gentle simmer, lid partly on", "Bubbles barely breaking. A hard boil splits the skins."],
+        ["s-bacon", `Cut ${A("bacon")} bacon into 1/2-inch pieces`, ""],
+        ["s-onion", `Finely chop ${A("garlic")} garlic and ${A("onion")} ${ingName("onion",k)}`, ""],
+        ["s-pep", `Chop ${A("redPep")} red and ${A("yelPep")} yellow bell ${k > 1 ? "peppers" : "pepper"}`, ""],
+        ["s-spice", "Mix the spices in a small bowl", spiceAmts + (k > 1 ? " Chipotle is scaled at 75% so the heat doesn't run away. Add more at the end if you want it." : "")],
+        ["s-garnish", "Slice scallions, shred Cheddar, cut lime wedges", "Leave in the fridge."]
+      ]},
+    { off:tBacon, headline:"Render the bacon. Taste a bean.",
+      ings:[["bacon",true]],
+      tasks:[
+        ["c-bacon", `Cook the bacon in the ${POT.replace(/^\d+(\.\d+)? qt /,"")} over medium until lightly crisp`, `About ${bacon} minutes.` + (big ? " Spread it out. Crowded bacon steams instead of rendering." : "")],
+        ["c-taste1", "Taste a pinto and a red bean", "Still chalky is fine here. Most fresh beans land at 45 to 75 minutes."]
+      ]},
+    { off:tArom, headline:"Aromatics and spices.",
+      ings:[["onion",true],["redPep",true],["yelPep",true],["garlic",true],{amt:"1 bowl", n:"spice mix", prepped:true},["salt"],["pepper"]],
+      tasks:[
+        ["a-add", "Add the onions, peppers, garlic and spice mix to the bacon", ""],
+        ["a-season", `Season with ${A("salt")} kosher salt and ${A("pepper")} black pepper`, "Starting amount. You'll correct at the end." + (k > 1 ? " Salt is scaled at 75% since it's easier to add than take away." : "")],
+        ["a-cook", "Cook until the vegetables are tender", `About ${arom} minutes.`]
+      ]},
+    { off:tMeat, headline: meatBatches > 1 ? `Brown the meat in ${meatBatches} batches.` : "Brown the meat.",
+      ings:[["beef"],["pork"]],
+      tasks: meatBatches > 1 ? [
+        ["m-batch", `Brown ${A("beef")} beef and ${A("pork")} pork in ${meatBatches} batches`, `Push the vegetables to one side, or brown in a large skillet and add each batch to the pot. Crowded meat steams and turns gray. About ${meat} minutes total.`],
+        ["m-done", "Cook until no pink remains and everything is back in the pot", ""],
+      ].concat(tDrain < tMeat ? [] : [["m-beans", "Check the beans again", "Done when creamy all the way through but still holding their shape."]]) : [
+        ["m-beef", `Add ${A("beef")} ground beef and break it up`, ""],
+        ["m-pork", `When it starts to brown, add ${A("pork")} ground pork`, "Cook until no pink remains, about 4 minutes."],
+      ].concat(tDrain < tMeat ? [] : [["m-beans", "Check the beans again", "Done when creamy all the way through but still holding their shape."]])},
+    { off:tDrain, headline:"Beans done? Drain them and save the liquid.",
+      ings:[{amt:"1 colander", n:"set over a bowl", prepped:false},["beanLiquid"]],
+      tasks:[
+        ["d-check", "Confirm all three beans are tender", "Not there yet? Pull the meat off the heat and keep simmering the beans. Never add underdone beans to the tomatoes."],
+        ["d-fish", `Fish out the ${ingName("halfOnion",k).replace(/,.*$/,"")} and ${ingName("bay",k)}`, ""],
+        ["d-drain", `Ladle off ${A("beanLiquid")} cooking liquid, then drain`, "The bean liquid is for loosening the chili later." + (tDrain + 5 < baseDone ? " The base isn't ready yet, so keep the drained beans covered." : "")]
+      ]},
+    { off:tBuild, headline:"Build the chili and start the long simmer.",
+      ings:[["beer"],{amt:amount("beans",k).replace(/ \(.*/,"")+" dry", n:"cooked beans", prepped:true},["crushed"],["diced"]],
+      tasks:[
+        ["u-beer", `Stir in ${A("beer")} beer and the cooked beans`, ""],
+        ["u-tom", `Add ${A("crushed")} crushed and ${A("diced")} diced tomatoes with their juice`, ""],
+        ["u-low", "Bring up to a bubble, then drop to low", (k > 1 ? "A full pot takes longer to come back up. Give it 10 to 15 minutes on medium first. " : "") + `${fmtDur(simmer)} from here.`]
+      ]},
+    { off:tBuild + Math.round(simmer/3), headline:"Stir and check.",
+      ings:[["beanLiquid"]],
+      tasks:[
+        ["k1-stir", "Stir from the bottom", "More beans means more starch on the bottom of the pot."],
+        ["k1-loose", "Too tight? Loosen with some of the reserved bean liquid", ""]
+      ]},
+    { off:tBuild + Math.round(simmer*2/3), headline:"Stir and check again.",
+      ings:[["chipotle"]],
+      tasks:[
+        ["k2-stir", "Stir from the bottom", ""],
+        ["k2-heat", "Taste for heat", "Want more? Add a pinch of chipotle now so it has time to bloom."]
+      ]},
+    { off:tEnd, headline:"Season and serve.",
+      ings:[{amt:"as needed", n:"kosher salt", prepped:false},["beanLiquid"],["garnish",true]],
+      tasks:[
+        ["e-salt", "Taste and correct the salt", "Expect to add more than the canned version needs, since these beans brought none with them."],
+        ["e-body", "Adjust the body with the last of the bean liquid if needed", ""],
+        ["e-serve", "Ladle up with lime wedges, sour cream, Cheddar and scallions", `Serves about ${Math.round(BASE_SERVINGS*k)}.`]
+      ]}
+  ];
+}
+
+/* ============================================================
+   State
+   ============================================================ */
 const KEY = "chili-plan-2026-11-16-v1";
-let state = { idx:0, done:{}, startAt:null, target:null };
-try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && typeof s.idx === "number") state = Object.assign(state, s); } catch(e) {}
-function save(){ try { localStorage.setItem(KEY, JSON.stringify(state)); } catch(e) {} }
+let S = { idx:0, done:{}, startAt:null, target:null, scale:1 };
+try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && typeof s.idx === "number") S = Object.assign(S, s); } catch(e) {}
+if (!SCALES.includes(S.scale)) S.scale = 1;
+function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {} }
 
-const TOTAL = BLOCKS[BLOCKS.length-1].off; /* minutes from bean boil to ready */
+let BLOCKS = [], TOTAL = 0;
+function rebuild(){
+  const all = buildBlocks(S.scale);
+  const pre = all.filter(b=>b.off===null), timed = all.filter(b=>b.off!==null).sort((a,b)=>a.off-b.off);
+  BLOCKS = pre.concat(timed); TOTAL = timed[timed.length-1].off;
+}
 const BRINE_MIN = 8*60, BRINE_MAX = 12*60;
 
-function ids(b){ const out=[]; BLOCKS[b].groups.forEach((g,gi)=>g[1].forEach((t,ti)=>out.push(b+"-"+gi+"-"+ti))); return out; }
-function isComplete(b){ const a=ids(b); return a.every(id=>state.done[id]); }
+function ids(B){ return B.tasks.map(t=>t[0]); }
+function isComplete(B){ return ids(B).every(id=>S.done[id]); }
 
-/* Actual start wins once the clock is running; otherwise plan back from the ready time. */
+/* ============================================================
+   Time
+   ============================================================ */
 function anchor(){
-  if (state.startAt) return state.startAt;
-  if (state.target) return state.target - TOTAL*60000;
+  if (S.startAt) return S.startAt;
+  if (S.target) return S.target - TOTAL*60000;
   return null;
 }
 function fmt(ms, withDay){
@@ -260,124 +375,155 @@ function fmt(ms, withDay){
   h = h%12 || 12;
   let s = h + ":" + String(m).padStart(2,"0") + ap;
   if (withDay) {
-    const today = new Date(); today.setHours(0,0,0,0);
-    const day = new Date(ms); day.setHours(0,0,0,0);
-    const diff = Math.round((day - today)/86400000);
+    const t0 = new Date(); t0.setHours(0,0,0,0);
+    const d0 = new Date(ms); d0.setHours(0,0,0,0);
+    const diff = Math.round((d0 - t0)/86400000);
     s += diff===0 ? " today" : diff===1 ? " tomorrow" : diff===-1 ? " yesterday" : " " + d.toLocaleDateString([], {weekday:"short"});
   }
   return s;
 }
-function clock(off){ return fmt(anchor() + off*60000); }
-function tabLabel(b){ return (b.off!==null && anchor()) ? clock(b.off) : b.label; }
-function bigLabel(b){
-  if (b.off===null) return b.label;
-  return anchor() ? clock(b.off) : "+" + b.label;
-}
-function mins(n){ n=Math.round(Math.abs(n)); const h=Math.floor(n/60), m=n%60; return (h? h+" hr ":"") + (m||!h? m+" min":"").trim(); }
+function rel(off){ return Math.floor(off/60) + ":" + String(off%60).padStart(2,"0"); }
+function fmtDur(m){ m = Math.round(Math.abs(m)); const h = Math.floor(m/60), mm = m%60; return h ? h + " hr" + (mm ? " " + mm + " min" : "") : mm + " min"; }
+function tabLabel(B){ return B.off===null ? B.label : (anchor() ? fmt(anchor() + B.off*60000) : rel(B.off)); }
+function bigLabel(B){ return B.off===null ? B.label : (anchor() ? fmt(anchor() + B.off*60000) : "+" + rel(B.off)); }
 
-function statusHtml(b){
+function statusHtml(B){
   const a = anchor(); if (!a) return "";
-  if (b.label==="Night before") {
-    return `<div class="status">Brine window: <b>${fmt(a-BRINE_MAX*60000,true)}</b> to <b>${fmt(a-BRINE_MIN*60000,true)}</b>. Beans go on to boil at <b>${fmt(a,true)}</b>.</div>`;
-  }
-  if (!state.startAt) {
-    if (b.label==="Day of") return `<div class="status">Put the bean pot on at <b>${fmt(a,true)}</b> to be ready at <b>${fmt(state.target,true)}</b>.</div>`;
-    return "";
-  }
-  if (!state.target) return "";
-  const proj = state.startAt + TOTAL*60000, diff = (proj - state.target)/60000;
-  if (Math.abs(diff) < 3) return `<div class="status ok">On track for <b>${fmt(state.target)}</b>.</div>`;
-  if (diff > 0) return `<div class="status late">Started <b>${mins(diff)} late</b>. Projected ready ${fmt(proj)}. To claw it back, trim the final simmer, but keep at least 1 hour so the beans soak up flavor.</div>`;
-  return `<div class="status ok">Started <b>${mins(diff)} early</b>. Projected ready ${fmt(proj)}. Hold on the lowest heat until ${fmt(state.target)}.</div>`;
+  if (B.label==="Night before") return `<div class="status">Brine window: <b>${fmt(a-BRINE_MAX*60000,true)}</b> to <b>${fmt(a-BRINE_MIN*60000,true)}</b>. Beans go on to boil at <b>${fmt(a,true)}</b>.</div>`;
+  if (!S.startAt) return B.label==="Day of" ? `<div class="status">Put the bean pot on at <b>${fmt(a,true)}</b> to be ready at <b>${fmt(S.target,true)}</b>.</div>` : "";
+  if (!S.target) return "";
+  const proj = S.startAt + TOTAL*60000, diff = (proj - S.target)/60000;
+  if (Math.abs(diff) < 3) return `<div class="status ok">On track for <b>${fmt(S.target)}</b>.</div>`;
+  if (diff > 0) return `<div class="status late">Running <b>${fmtDur(diff)} late</b>. Projected ready ${fmt(proj)}. To claw it back, trim the final simmer, but keep at least 1 hour so the beans soak up flavor.</div>`;
+  return `<div class="status ok">Running <b>${fmtDur(diff)} early</b>. Projected ready ${fmt(proj)}. Hold on the lowest heat until ${fmt(S.target)}.</div>`;
 }
 
-const tl = document.getElementById("timeline");
-const main = document.getElementById("main");
-function esc(s){ return s.replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+/* ============================================================
+   Render
+   ============================================================ */
+const tl = document.getElementById("timeline"), main = document.getElementById("main");
+function esc(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;"); }
+
+function gatherHtml(B){
+  if (!B.ings || !B.ings.length) return "";
+  const rows = B.ings.map(x=>{
+    let amt, n, prepped;
+    if (Array.isArray(x)) { amt = A(x[0]); n = ingName(x[0], S.scale); prepped = !!x[1]; }
+    else { amt = x.amt; n = x.n; prepped = !!x.prepped; }
+    return `<li><span class="amt">${esc(amt)}</span><span class="nm">${esc(n)}${prepped ? `<span class="badge">prepped</span>` : ""}</span></li>`;
+  }).join("");
+  return `<div class="gather"><div class="ings"><h4>Ingredient list for this step</h4><ul>${rows}</ul></div></div>`;
+}
 
 function render(){
-  const b = BLOCKS[state.idx];
-  tl.innerHTML = BLOCKS.map((x,i)=>`<button type="button" role="tab" aria-selected="${i===state.idx}" class="tl ${i===state.idx?"cur":""} ${isComplete(i)?"complete":""}" data-i="${i}">${tabLabel(x)}${isComplete(i)?" ✓":""}</button>`).join("");
-  const all = ids(state.idx), n = all.filter(id=>state.done[id]).length;
-  const sub = (b.off!==null && anchor()) ? " · +" + b.label + " from start" : "";
-  let html = `<div class="when"><div class="time" style="${b.off===null?"font-size:44px":""}">${bigLabel(b)}</div><div class="count">Step ${state.idx+1} of ${BLOCKS.length} · ${n}/${all.length} done${sub}</div></div>
-    <div class="headline">${esc(b.headline)}</div>
-    ${statusHtml(b)}
-    <div class="progress"><div style="width:${all.length? n/all.length*100:0}%"></div></div>`;
-  b.groups.forEach((g,gi)=>{
-    const d = DISH[g[0]];
-    html += `<section class="group"><div class="tag" style="color:${d.color}"><i style="background:${d.color}"></i>${d.label}</div>`;
-    g[1].forEach((t,ti)=>{
-      const id = state.idx+"-"+gi+"-"+ti, on = !!state.done[id];
-      html += `<label class="task ${on?"checked":""}"><input type="checkbox" data-id="${id}" ${on?"checked":""}><div><div class="t">${esc(t[0])}</div>${t[1]?`<div class="d">${esc(t[1])}</div>`:""}</div></label>`;
-    });
-    html += `</section>`;
+  const B = BLOCKS[S.idx];
+  tl.innerHTML = BLOCKS.map((x,i)=>`<button type="button" role="tab" aria-selected="${i===S.idx}" class="tl ${i===S.idx?"cur":""} ${isComplete(x)?"complete":""}" data-i="${i}">${tabLabel(x)}${isComplete(x)?" ✓":""}</button>`).join("");
+  const all = ids(B), n = all.filter(id=>S.done[id]).length;
+  const sub = (B.off!==null && anchor()) ? " · +" + rel(B.off) + " from start" : "";
+  const batch = S.scale !== 1 ? ` · ${S.scale}x batch` : "";
+  let h = `<div class="when"><div class="time" style="${B.off===null?"font-size:44px":""}">${bigLabel(B)}</div><div class="count">Step ${S.idx+1} of ${BLOCKS.length} · ${n}/${all.length} done${sub}${batch}</div></div>
+    <div class="headline">${esc(B.headline)}</div>
+    ${statusHtml(B)}
+    <div class="progress"><div style="width:${all.length ? n/all.length*100 : 0}%"></div></div>
+    ${gatherHtml(B)}
+    <section class="group">`;
+  B.tasks.forEach(t=>{
+    const on = !!S.done[t[0]];
+    h += `<label class="task ${on?"checked":""}"><input type="checkbox" data-id="${t[0]}" ${on?"checked":""}><div><div class="t">${esc(t[1])}</div>${t[2] ? `<div class="d">${esc(t[2])}</div>` : ""}</div></label>`;
   });
-  if (b.startBtn) {
-    html += state.startAt
-      ? `<div class="note"><b>Clock started at ${fmt(state.startAt)}.</b> Times now follow your actual start. Reset to clear it.</div>`
+  h += `</section>`;
+  if (B.startBtn) {
+    h += S.startAt
+      ? `<div class="note"><b>Clock started at ${fmt(S.startAt)}.</b> Times now follow your actual start. Reset to clear it.</div>`
       : `<button type="button" class="start" id="startBtn">Start the clock · bean pot is on</button>`
-        + (state.target ? "" : `<div class="note"><b>Cooking to a time?</b> Tap Ready by at the top and every step gets a clock time.</div>`);
+        + (S.target ? "" : `<div class="note"><b>Cooking to a time?</b> Tap Ready by at the top and every step gets a clock time.</div>`);
   }
-  if (state.idx < BLOCKS.length-1) {
-    const nx = BLOCKS[state.idx+1];
-    html += `<div class="note"><b>Up next${nx.off!==null?" at "+tabLabel(nx):": "+nx.label}:</b> ${esc(nx.headline)}</div>`;
+  if (S.idx < BLOCKS.length-1) {
+    const nx = BLOCKS[S.idx+1];
+    h += `<div class="note"><b>Up next${nx.off!==null ? " at " + tabLabel(nx) : ": " + nx.label}:</b> ${esc(nx.headline)}</div>`;
   }
-  main.innerHTML = html;
+  main.innerHTML = h;
   const sb = document.getElementById("startBtn");
-  if (sb) sb.onclick = ()=>{ state.startAt = Date.now(); go(state.idx+1); };
-  document.getElementById("prev").disabled = state.idx===0;
+  if (sb) sb.onclick = ()=>{ S.startAt = Date.now(); go(S.idx+1); };
+  document.getElementById("prev").disabled = S.idx===0;
   const nextBtn = document.getElementById("next");
-  nextBtn.disabled = state.idx===BLOCKS.length-1;
-  nextBtn.textContent = state.idx===BLOCKS.length-1 ? "Enjoy" : "Next · " + tabLabel(BLOCKS[state.idx+1]);
+  nextBtn.disabled = S.idx===BLOCKS.length-1;
+  nextBtn.textContent = S.idx===BLOCKS.length-1 ? "Enjoy" : "Next · " + tabLabel(BLOCKS[S.idx+1]);
   document.getElementById("nowBtn").style.display = anchor() ? "" : "none";
   const rb = document.getElementById("readyBtn");
-  rb.textContent = state.target ? "Ready " + fmt(state.target) : "Ready by";
-  rb.classList.toggle("set", !!state.target);
+  rb.textContent = S.target ? "Ready " + fmt(S.target) : "Ready by";
+  rb.classList.toggle("set", !!S.target);
+  const bb = document.getElementById("batchBtn");
+  bb.textContent = S.scale + "x batch";
+  bb.classList.toggle("set", S.scale !== 1);
   const cur = tl.querySelector(".cur"); if (cur) cur.scrollIntoView({inline:"center", block:"nearest"});
 }
 
-function go(i){ state.idx = Math.max(0, Math.min(BLOCKS.length-1, i)); save(); render(); window.scrollTo(0,0); }
+function go(i){ S.idx = Math.max(0, Math.min(BLOCKS.length-1, i)); save(); render(); window.scrollTo(0,0); }
 
-tl.addEventListener("click", e=>{ const t=e.target.closest(".tl"); if(t) go(+t.dataset.i); });
+/* ============================================================
+   Events
+   ============================================================ */
+tl.addEventListener("click", e=>{ const t = e.target.closest(".tl"); if (t) go(+t.dataset.i); });
 main.addEventListener("change", e=>{
-  const c = e.target.closest("input[data-id]"); if(!c) return;
-  if (c.checked) state.done[c.dataset.id] = true; else delete state.done[c.dataset.id];
+  const c = e.target.closest("input[data-id]"); if (!c) return;
+  if (c.checked) S.done[c.dataset.id] = true; else delete S.done[c.dataset.id];
   save(); const y = window.scrollY; render(); window.scrollTo(0,y);
 });
-document.getElementById("prev").onclick = ()=>go(state.idx-1);
-document.getElementById("next").onclick = ()=>go(state.idx+1);
+document.getElementById("prev").onclick = ()=>go(S.idx-1);
+document.getElementById("next").onclick = ()=>go(S.idx+1);
 document.getElementById("nowBtn").onclick = ()=>{
   const a = anchor(); if (!a) return;
   const el = (Date.now() - a)/60000;
-  if (el < -BRINE_MIN) return go(0);   /* still time to brine */
-  if (el < 0) return go(1);            /* brining, waiting for the bean pot */
+  if (el < -BRINE_MIN) return go(0);
+  if (el < 0) return go(1);
   let pick = 2;
-  BLOCKS.forEach((b,i)=>{ if(b.off!==null && el >= b.off) pick=i; });
+  BLOCKS.forEach((b,i)=>{ if (b.off!==null && el >= b.off) pick = i; });
   go(pick);
 };
+
+/* reset */
+const modal = document.getElementById("modal");
+document.getElementById("resetBtn").onclick = ()=>modal.classList.add("open");
+document.getElementById("mCancel").onclick = ()=>modal.classList.remove("open");
+document.getElementById("mOk").onclick = ()=>{ S = { idx:0, done:{}, startAt:null, target:null, scale:S.scale }; save(); modal.classList.remove("open"); render(); };
+
+/* ready by */
 const rmodal = document.getElementById("rmodal"), rtime = document.getElementById("rtime");
 document.getElementById("readyBtn").onclick = ()=>{
-  const d = state.target ? new Date(state.target) : new Date(Date.now() + 3*3600000);
+  const d = S.target ? new Date(S.target) : new Date(Date.now() + 3*3600000);
   rtime.value = String(d.getHours()).padStart(2,"0") + ":" + String(Math.floor(d.getMinutes()/5)*5).padStart(2,"0");
+  document.getElementById("rhint").textContent = `Every step gets a real clock time, counted back from this. Day-of time for a ${S.scale}x batch is ${fmtDur(TOTAL)}, plus an 8 to 12 hour brine the night before.`;
   rmodal.classList.add("open"); rtime.focus();
 };
 document.getElementById("rSave").onclick = ()=>{
   if (!rtime.value) return;
   const [h,m] = rtime.value.split(":").map(Number);
   const t = new Date(); t.setHours(h,m,0,0);
-  /* Next occurrence of that time. If the clock is already running, keep it on the day of the cook. */
-  const ref = state.startAt || Date.now();
-  if (t.getTime() <= ref) t.setDate(t.getDate()+1);
-  state.target = t.getTime(); save(); rmodal.classList.remove("open"); render();
+  if (t.getTime() <= (S.startAt || Date.now())) t.setDate(t.getDate()+1);
+  S.target = t.getTime(); save(); rmodal.classList.remove("open"); render();
 };
-document.getElementById("rClear").onclick = ()=>{ state.target=null; save(); rmodal.classList.remove("open"); render(); };
-const modal = document.getElementById("modal");
-document.getElementById("resetBtn").onclick = ()=>modal.classList.add("open");
-document.getElementById("mCancel").onclick = ()=>modal.classList.remove("open");
-document.getElementById("mOk").onclick = ()=>{ state={idx:0,done:{},startAt:null,target:null}; save(); modal.classList.remove("open"); render(); };
-document.addEventListener("keydown", e=>{ if(e.key==="Escape"){ modal.classList.remove("open"); rmodal.classList.remove("open"); } });
+document.getElementById("rClear").onclick = ()=>{ S.target = null; save(); rmodal.classList.remove("open"); render(); };
 
+/* batch */
+const bmodal = document.getElementById("bmodal"), bopts = document.getElementById("bopts");
+function renderBatch(){
+  bopts.innerHTML = SCALES.map(k=>`<button type="button" class="${k===S.scale?"on":""}" data-k="${k}">${k}x</button>`).join("");
+  const k = S.scale;
+  document.getElementById("bhint").textContent =
+    `${amount("beans",k).replace(/ \(.*/,"")} dry beans, ${amount("beef",k)} each of beef and pork. Serves about ${Math.round(BASE_SERVINGS*k)}. Day-of time ${fmtDur(TOTAL)}.` +
+    (k > 1 ? " Chipotle and salt scale at 75% so you can correct at the end. Meat browns in batches at 2x and up." : "");
+}
+document.getElementById("batchBtn").onclick = ()=>{ renderBatch(); bmodal.classList.add("open"); };
+bopts.addEventListener("click", e=>{
+  const b = e.target.closest("button[data-k]"); if (!b) return;
+  S.scale = +b.dataset.k; rebuild(); if (S.idx >= BLOCKS.length) S.idx = 0; save(); renderBatch(); render();
+});
+document.getElementById("bDone").onclick = ()=>bmodal.classList.remove("open");
+
+document.addEventListener("keydown", e=>{ if (e.key==="Escape") [modal, rmodal, bmodal].forEach(m=>m.classList.remove("open")); });
+
+rebuild();
 render();
 </script>
 </body>
