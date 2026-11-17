@@ -79,6 +79,22 @@
   .badge{display:inline-block;margin-left:6px;padding:1px 7px;border-radius:10px;font:600 11px Inter,sans-serif;letter-spacing:.5px;text-transform:uppercase;vertical-align:2px;background:#3f5a53;color:#CFE7E0}
   .gather{margin:6px 0 4px}
   .gather>.ings{border-left-color:var(--accent)}
+  .ilist h2{font:600 15px Oswald,sans-serif;letter-spacing:2px;text-transform:uppercase;color:var(--muted);margin:26px 0 10px}
+  .ilist h2:first-of-type{margin-top:6px}
+  .ilist .ings{margin-bottom:0}
+  .ilist label.irow{display:flex;gap:12px;align-items:center;padding:8px 0;border-top:1px solid #36312c;cursor:pointer}
+  .ilist label.irow:first-child{border-top:none}
+  .ilist label.irow input{appearance:none;-webkit-appearance:none;flex:0 0 24px;width:24px;height:24px;margin:0;border:2px solid var(--muted);border-radius:6px;display:grid;place-content:center;cursor:pointer}
+  .ilist label.irow input:checked{background:var(--done);border-color:var(--done)}
+  .ilist label.irow input:checked::after{content:"";width:10px;height:6px;border-left:3px solid #1E1C1A;border-bottom:3px solid #1E1C1A;transform:translateY(-2px) rotate(-45deg)}
+  .ilist label.irow.have .amt,.ilist label.irow.have .nm{opacity:.45;text-decoration:line-through}
+  .ilist .amt{flex:0 0 auto;min-width:104px;font-weight:600}
+  .ilist .nm{flex:1;color:#E9E2D8;font-size:16px;line-height:1.35}
+  .ilist .sub{color:var(--muted);font-size:13px;display:block;margin-top:2px}
+  .ilist .bopts{margin:10px 0 4px}
+  .ilist .top2{display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap}
+  .ilist .title{font:700 34px Oswald,sans-serif;color:var(--accent);line-height:1.1}
+  .ilist .meta{color:var(--muted);font-size:15px}
   .bopts{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px}
   .bopts button{min-height:52px;border-radius:12px;border:1px solid var(--line);background:none;color:var(--text);font:600 18px Oswald,sans-serif;cursor:pointer}
   .bopts button.on{background:var(--accent);border-color:var(--accent);color:#1E1C1A}
@@ -89,6 +105,7 @@
   <div class="top">
     <div class="brand">Chili Night</div>
     <div class="tools">
+      <button class="chip-btn" id="ingBtn" type="button">Ingredients</button>
       <button class="chip-btn" id="batchBtn" type="button">1x batch</button>
       <button class="chip-btn" id="readyBtn" type="button">Ready by</button>
       <button class="chip-btn" id="nowBtn" type="button">Now</button>
@@ -345,9 +362,10 @@ function buildBlocks(k){
    State
    ============================================================ */
 const KEY = "chili-plan-2026-11-16-v1";
-let S = { idx:0, done:{}, startAt:null, target:null, scale:1 };
+let S = { idx:0, done:{}, startAt:null, target:null, scale:1, view:"plan", have:{} };
 try { const s = JSON.parse(localStorage.getItem(KEY)); if (s && typeof s.idx === "number") S = Object.assign(S, s); } catch(e) {}
 if (!SCALES.includes(S.scale)) S.scale = 1;
+if (!S.have) S.have = {};
 function save(){ try { localStorage.setItem(KEY, JSON.stringify(S)); } catch(e) {} }
 
 let BLOCKS = [], TOTAL = 0;
@@ -415,7 +433,52 @@ function gatherHtml(B){
   return `<div class="gather"><div class="ings"><h4>Ingredient list for this step</h4><ul>${rows}</ul></div></div>`;
 }
 
+/* Full ingredient list for the selected batch, grouped the way you'd shop and set up. */
+const GROUPS = [
+  ["For the beans", ["beans","brineSalt","halfOnion","bay","beanSalt"]],
+  ["Chili base", ["bacon","onion","redPep","yelPep","garlic","beef","pork"]],
+  ["Spices and seasoning", ["chiliP","cumin","chipotle","oregano","paprika","salt","pepper"]],
+  ["Liquids and tomatoes", ["beer","crushed","diced"]],
+  ["To serve", [{n:"lime wedges"},{n:"sour cream"},{n:"shredded Cheddar"},{n:"sliced scallions"}]]
+];
+const NOTES = {
+  halfOnion: k=>`${Math.ceil(+amount("halfOnion",k)/2)} onion${Math.ceil(+amount("halfOnion",k)/2) > 1 ? "s" : ""}, halved`,
+  chipotle: k=> k > 1 ? "Scaled at 75%. Add more to taste." : "",
+  salt: k=> k > 1 ? "Scaled at 75%. Correct at the end." : "",
+  beans: k=> k*12 > 32 ? "Two 2 lb bags" : "One 2 lb bag"
+};
+function renderIngredients(){
+  const k = S.scale;
+  tl.style.display = "none"; document.querySelector("nav").style.display = "none";
+  const allSalt = ["brineSalt","beanSalt","salt"];
+  let h = `<div class="ilist">
+    <div class="top2"><div class="title">Ingredient list</div><div class="meta">${k}x batch · serves about ${Math.round(BASE_SERVINGS*k)}</div></div>
+    <div class="bopts">${SCALES.map(x=>`<button type="button" class="${x===k?"on":""}" data-k="${x}">${x}x</button>`).join("")}</div>`;
+  GROUPS.forEach(([title, items])=>{
+    h += `<h2>${title}</h2><div class="ings"><ul style="list-style:none;margin:0;padding:0">`;
+    items.forEach(it=>{
+      const key = typeof it === "string" ? it : "g-" + it.n;
+      const amt = typeof it === "string" ? A(it) : "to taste";
+      const nm  = typeof it === "string" ? ingName(it, k) : it.n;
+      const note = typeof it === "string" && NOTES[it] ? NOTES[it](k) : "";
+      const on = !!S.have[key];
+      h += `<li style="border:none;padding:0"><label class="irow ${on?"have":""}"><input type="checkbox" data-have="${esc(key)}" ${on?"checked":""}><span class="amt">${esc(amt)}</span><span class="nm">${esc(nm)}${note ? `<span class="sub">${esc(note)}</span>` : ""}</span></label></li>`;
+    });
+    h += `</ul></div>`;
+  });
+  h += `<div class="note"><b>Also needed:</b> ${A("brineWater")} water for the brine, plenty of water for the bean pot, and a colander. The ${A("beanLiquid")} of bean cooking liquid comes from the beans.</div>
+    <button type="button" class="start" id="backBtn">Back to the plan</button></div>`;
+  main.innerHTML = h;
+  document.getElementById("ingBtn").textContent = "Plan";
+  const bb = document.getElementById("batchBtn"); bb.textContent = k + "x batch"; bb.classList.toggle("set", k !== 1);
+  const rb = document.getElementById("readyBtn"); rb.textContent = S.target ? "Ready " + fmt(S.target) : "Ready by"; rb.classList.toggle("set", !!S.target);
+  document.getElementById("nowBtn").style.display = "none";
+}
+
 function render(){
+  if (S.view === "ings") return renderIngredients();
+  tl.style.display = ""; document.querySelector("nav").style.display = "";
+  document.getElementById("ingBtn").textContent = "Ingredients";
   const B = BLOCKS[S.idx];
   tl.innerHTML = BLOCKS.map((x,i)=>`<button type="button" role="tab" aria-selected="${i===S.idx}" class="tl ${i===S.idx?"cur":""} ${isComplete(x)?"complete":""}" data-i="${i}">${tabLabel(x)}${isComplete(x)?" ✓":""}</button>`).join("");
   const all = ids(B), n = all.filter(id=>S.done[id]).length;
@@ -464,8 +527,16 @@ function go(i){ S.idx = Math.max(0, Math.min(BLOCKS.length-1, i)); save(); rende
 /* ============================================================
    Events
    ============================================================ */
+document.getElementById("ingBtn").onclick = ()=>{ S.view = S.view === "ings" ? "plan" : "ings"; save(); render(); window.scrollTo(0,0); };
+main.addEventListener("click", e=>{
+  if (e.target.id === "backBtn") { S.view = "plan"; save(); render(); window.scrollTo(0,0); return; }
+  const b = e.target.closest(".ilist .bopts button[data-k]"); if (!b) return;
+  S.scale = +b.dataset.k; rebuild(); if (S.idx >= BLOCKS.length) S.idx = 0; save(); render();
+});
 tl.addEventListener("click", e=>{ const t = e.target.closest(".tl"); if (t) go(+t.dataset.i); });
 main.addEventListener("change", e=>{
+  const hv = e.target.closest("input[data-have]");
+  if (hv) { if (hv.checked) S.have[hv.dataset.have] = true; else delete S.have[hv.dataset.have]; save(); const y = window.scrollY; render(); window.scrollTo(0,y); return; }
   const c = e.target.closest("input[data-id]"); if (!c) return;
   if (c.checked) S.done[c.dataset.id] = true; else delete S.done[c.dataset.id];
   save(); const y = window.scrollY; render(); window.scrollTo(0,y);
@@ -486,7 +557,7 @@ document.getElementById("nowBtn").onclick = ()=>{
 const modal = document.getElementById("modal");
 document.getElementById("resetBtn").onclick = ()=>modal.classList.add("open");
 document.getElementById("mCancel").onclick = ()=>modal.classList.remove("open");
-document.getElementById("mOk").onclick = ()=>{ S = { idx:0, done:{}, startAt:null, target:null, scale:S.scale }; save(); modal.classList.remove("open"); render(); };
+document.getElementById("mOk").onclick = ()=>{ S = { idx:0, done:{}, startAt:null, target:null, scale:S.scale, view:"plan", have:{} }; save(); modal.classList.remove("open"); render(); };
 
 /* ready by */
 const rmodal = document.getElementById("rmodal"), rtime = document.getElementById("rtime");
